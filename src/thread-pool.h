@@ -15,9 +15,59 @@
 #include <thread>      // for thread
 #include <vector>      // for vector
 
+#include "Semaphore.h"
+#include <queue>
+
+#include <functional>
+#include <mutex>
+#include <thread>
+#include <vector>
+
+class ThreadPool;  // Forward declaration
+
+class Worker {
+public:
+    Worker(size_t ID) : ID(ID), th([this, &ID] { work(&ID); }) {}
+
+    Worker(const Worker&) = delete;
+    Worker& operator=(const Worker&) = delete;
+
+    Worker(Worker&& other) noexcept : ID(other.ID), th(std::move(other.th)) {
+        // Move constructor: transfer ownership of resources
+    }
+
+    Worker& operator=(Worker&& other) noexcept {
+        if (this != &other) {
+            ID = other.ID;
+            th = std::move(other.th);
+        }
+        return *this;
+    }
+
+    ~Worker() {
+        if (th.joinable()) {
+            th.join();
+        }
+    }
+    bool working = false;
+    std::mutex workLock;
+    std::mutex thnk;
+    Semaphore workSem;
+    std::function<void(void)> thunk;
+
+private:
+    size_t ID;
+    std::thread th;
+    void work(size_t * ID);  // Only declare here, define in .cc file
+};
+
+
+
 class ThreadPool {
  public:
 
+  void dispatcher();
+  // void worker(size_t * ID);
 /**
  * Constructs a ThreadPool configured to spawn up to the specified
  * number of threads.
@@ -47,7 +97,12 @@ class ThreadPool {
   
  private:
   std::thread dt;                // dispatcher thread handle
-  std::vector<std::thread> wts;  // worker thread handles
+  std::vector<Worker> wts;  // worker thread handles
+  Semaphore sem;
+  std::queue<std::function<void(void)>> thunks;
+  mutex thunkLock;
+  bool done = false;
+  std::condition_variable cv;
 
 /**
  * ThreadPools are the type of thing that shouldn't be cloneable, since it's
