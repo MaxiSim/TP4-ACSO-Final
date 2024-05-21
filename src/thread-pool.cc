@@ -1,77 +1,116 @@
-/**
- * File: thread-pool.cc
- * --------------------
- * Presents the implementation of the ThreadPool class.
- */
-
 #include "thread-pool.h"
 #include "Semaphore.h"
 #include <iostream>
 using namespace std;
 
 void ThreadPool::dispatcher() {
-    while (1){
+    while (true) {
         sem.wait();
         thunkLock.lock();
-        if (done && (thunks.size() == 0)){
-            cout << "No thunks to execute" << endl;
+        if (kill) {
             thunkLock.unlock();
             return;
         }
+        if (done && thunks.empty()) {
+            thunkLock.unlock();
+            break;
+        }
+        if (thunks.empty()) {
+            thunkLock.unlock();
+            continue;
+        }
         auto thunk = thunks.front();
         thunks.pop();
-        for (size_t i = 0; i < wts.size(); i++){
-            wts[i].workLock.lock();
-            if (!wts[i].working){
-                wts[i].thnk.lock();
-                wts[i].thunk = thunk;
-                wts[i].workSem.signal();
-                wts[i].thnk.unlock();
-                wts[i].workLock.unlock();
+        thunkLock.unlock();
+
+        for (auto& worker : wts) {
+            lock_guard<mutex> lk(worker.workLock);
+            if (!worker.working) {
+                worker.thnk.lock();
+                worker.thunk = thunk;
+                worker.workSem.signal();
+                worker.thnk.unlock();
                 break;
             }
-            wts[i].workLock.unlock();
         }
-        thunkLock.unlock();
     }
 }
 
-void Worker::work(size_t * ID){
-    while (1){
+void Worker::work(size_t *ID) {
+    while (true) {
         workSem.wait();
         workLock.lock();
         working = true;
         thnk.lock();
-        if (thunk == nullptr){
-            working = false;
-            workLock.unlock();
+        if (kill) {
             thnk.unlock();
+            workLock.unlock();
             return;
+        }
+        if (!thunk) {
+            working = false;
+            thnk.unlock();
+            workLock.unlock();
+            continue;
         }
         workLock.unlock();
         thunk();
         workLock.lock();
-        thnk.unlock();
         working = false;
+        thnk.unlock();
         workLock.unlock();
     }
 }
 
 ThreadPool::ThreadPool(size_t numThreads) : wts() {
     wts.reserve(numThreads);
-    for (size_t i = 0; i < numThreads; i++){
-        wts.emplace_back(i);  // Properly use emplace_back
+    for (size_t i = 0; i < numThreads; ++i) {
+        wts.emplace_back(i);
     }
     dt = thread([this] { dispatcher(); });
 }
 
 void ThreadPool::schedule(const function<void(void)>& thunk) {
-    thunkLock.lock();
+    lock_guard<mutex> lk(thunkLock);
     thunks.push(thunk);
     sem.signal();
-    thunkLock.unlock();
 }
 
-void ThreadPool::wait() {}
+void ThreadPool::wait() {
+    int counter = 0;
+    while(true){
+        if (thunks.size() == 0){
+            for (auto& worker: wts) {
+                worker.workLock.lock();
+                if (worker.working == false){
+                    counter++;
+                }
+                worker.workLock.unlock();
+            }
+            if (counter == wts.size()){
+                break;
+            }
+            counter = 0;
+        }
+    }
+}
 
-ThreadPool::~ThreadPool() {}
+ThreadPool::~ThreadPool() {
+    {
+        lock_guard<mutex> lk(thunkLock);
+        kill = true;
+        sem.signal();
+    }
+    dt.join();
+
+    for (auto& worker : wts) {
+        {
+            lock_guard<mutex> wl(worker.workLock);
+            worker.thnk.lock();
+            worker.kill = true;
+            worker.workSem.signal();
+            worker.thnk.unlock();
+        }
+        worker.getThread().join();
+    }
+}

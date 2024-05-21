@@ -50,10 +50,15 @@ public:
         }
     }
     bool working = false;
+    bool kill = false;
     std::mutex workLock;
     std::mutex thnk;
     Semaphore workSem;
     std::function<void(void)> thunk;
+
+    thread getThread() {
+        return std::move(th);
+    }
 
 private:
     size_t ID;
@@ -67,7 +72,6 @@ class ThreadPool {
  public:
 
   void dispatcher();
-  // void worker(size_t * ID);
 /**
  * Constructs a ThreadPool configured to spawn up to the specified
  * number of threads.
@@ -102,6 +106,7 @@ class ThreadPool {
   std::queue<std::function<void(void)>> thunks;
   mutex thunkLock;
   bool done = false;
+  bool kill = false;
   std::condition_variable cv;
 
 /**
