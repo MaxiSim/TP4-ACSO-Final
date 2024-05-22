@@ -52,7 +52,6 @@ public:
     bool working = false;
     bool kill = false;
     std::mutex workLock;
-    std::mutex thnk;
     Semaphore workSem;
     std::function<void(void)> thunk;
 
@@ -102,7 +101,8 @@ class ThreadPool {
  private:
   std::thread dt;                // dispatcher thread handle
   std::vector<Worker> wts;  // worker thread handles
-  Semaphore sem;
+  Semaphore dtSem;
+  Semaphore wSem;
   std::queue<std::function<void(void)>> thunks;
   mutex thunkLock;
   bool done = false;
