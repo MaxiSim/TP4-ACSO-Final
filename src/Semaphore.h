@@ -20,6 +20,7 @@ class Semaphore
         Semaphore(int count = 0); 
         void signal ();
         void wait(); 
+        int getCount(){return count_;};
 
     private:
 

@@ -3,6 +3,56 @@
 #include <iostream>
 using namespace std;
 
+// void ThreadPool::dispatcher() {
+//     while (1) {
+//         dtSem.wait();
+//         wSem.wait();
+//         thunkLock.lock();
+//         if (kill) {
+//             thunkLock.unlock();
+//             return;
+//         }
+//         auto thunk = thunks.front();
+//         thunks.pop();
+//         thunkLock.unlock();
+
+//         for (auto& worker : wts) {
+//             lock_guard<mutex> lk(worker.workLock);
+//             if (!worker.working) {
+//                 worker.thunk = thunk;
+//                 worker.working = true;
+//                 worker.workSem.signal();
+//                 break;
+//             }
+//         }
+//     }
+// }
+
+// void Worker::work(size_t *ID) {
+//     while (true) {
+//         workSem.wait();
+//         workLock.lock();
+//         if (kill) {
+//             working = false;
+//             workLock.unlock();
+//             return;
+//         }
+//         workLock.unlock();
+//         thunk();
+//         workLock.lock();
+//         working = false;
+//         workLock.unlock();
+//     }
+// }
+
+// ThreadPool::ThreadPool(size_t numThreads) : wts(), wSem(numThreads) {
+//     wts.reserve(numThreads);
+//     for (size_t i = 0; i < numThreads; ++i) {
+//         wts.emplace_back(i);
+//     }
+//     dt = thread([this] { dispatcher(); });
+// }
+
 void ThreadPool::dispatcher() {
     while (1) {
         dtSem.wait();
@@ -15,7 +65,6 @@ void ThreadPool::dispatcher() {
         auto thunk = thunks.front();
         thunks.pop();
         thunkLock.unlock();
-
         for (auto& worker : wts) {
             lock_guard<mutex> lk(worker.workLock);
             if (!worker.working) {
@@ -28,29 +77,30 @@ void ThreadPool::dispatcher() {
     }
 }
 
-void Worker::work(size_t *ID) {
+
+void ThreadPool::work(Worker * worker) {
     while (true) {
-        workSem.wait();
-        workLock.lock();
-        if (kill) {
-            working = false;
-            workLock.unlock();
+        worker->workSem.wait();
+        worker->workLock.lock();
+        if (worker->kill) {
+            worker->working = false;
+            worker->workLock.unlock();
             return;
         }
-        workLock.unlock();
-        thunk();
-        workLock.lock();
-        working = false;
-        workLock.unlock();
+        worker->workLock.unlock();
+        worker->thunk();
+        worker->workLock.lock();
+        worker->working = false;
+        worker->workLock.unlock();
+        wSem.signal();
     }
 }
 
-ThreadPool::ThreadPool(size_t numThreads) : wts(), wSem(numThreads) {
-    wts.reserve(numThreads);
-    for (size_t i = 0; i < numThreads; ++i) {
-        wts.emplace_back(i);
+ThreadPool::ThreadPool(size_t numThreads) : wts(numThreads), wSem(numThreads) {
+    for (auto& worker : wts) {
+        worker.th = thread([this, &worker] { work(&worker); });
     }
-    dt = thread([this] { dispatcher(); });
+    dt = thread([this](){dispatcher();});
 }
 
 void ThreadPool::schedule(const function<void(void)>& thunk) {
@@ -59,26 +109,31 @@ void ThreadPool::schedule(const function<void(void)>& thunk) {
     dtSem.signal();
 }
 
+// void ThreadPool::wait() {
+//     int counter = 0;
+//     while(true){
+//         if (thunks.size() == 0){
+//             for (auto& worker: wts) {
+//                 worker.workLock.lock();
+//                 if (worker.working == false){
+//                     counter++;
+//                 }
+//                 worker.workLock.unlock();
+//             }
+//             if (counter == wts.size()){
+//                 break;
+//             }
+//             counter = 0;
+//         }
+//     }
+// }
+
 void ThreadPool::wait() {
-    int counter = 0;
-    while(true){
-        if (thunks.size() == 0){
-            for (auto& worker: wts) {
-                worker.workLock.lock();
-                if (worker.working == false){
-                    counter++;
-                }
-                worker.workLock.unlock();
-            }
-            if (counter == wts.size()){
-                break;
-            }
-            counter = 0;
-        }
-    }
+    thunkLock.lock();
 }
 
 ThreadPool::~ThreadPool() {
+    wait();
     {
         lock_guard<mutex> lk(thunkLock);
         kill = true;
@@ -89,11 +144,9 @@ ThreadPool::~ThreadPool() {
     for (auto& worker : wts) {
         {
             lock_guard<mutex> wl(worker.workLock);
-            worker.thnk.lock();
             worker.kill = true;
             worker.workSem.signal();
-            worker.thnk.unlock();
         }
-        worker.getThread().join();
+        worker.th.join();
     }
 }
