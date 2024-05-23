@@ -25,50 +25,6 @@
 
 class ThreadPool;  // Forward declaration
 
-// class Worker {
-// public:
-//     Worker(size_t ID) : ID(ID), th([this, &ID] { work(&ID); }) {}
-
-//     Worker(const Worker&) = delete;
-//     Worker& operator=(const Worker&) = delete;
-
-//     Worker(Worker&& other) noexcept : ID(other.ID), th(std::move(other.th)) {
-//         // Move constructor: transfer ownership of resources
-//     }
-
-//     Worker& operator=(Worker&& other) noexcept {
-//         if (this != &other) {
-//             ID = other.ID;
-//             th = std::move(other.th);
-//         }
-//         return *this;
-//     }
-
-//     ~Worker() {
-//         if (th.joinable()) {
-//             th.join();
-//         }
-//     }
-//     bool working = false;
-//     bool kill = false;
-//     std::mutex workLock;
-//     Semaphore workSem;
-//     std::function<void(void)> thunk;
-
-//     thread getThread() {
-//         return std::move(th);
-//     }
-
-// private:
-//     size_t ID;
-//     std::thread th;
-//     void work(size_t * ID);  // Only declare here, define in .cc file
-// };
-
-
-
-
-
 class ThreadPool {
  public:
 /**
@@ -109,16 +65,18 @@ class ThreadPool {
         std::thread th;
   };
 
-  std::thread dt;                // dispatcher thread handle
-  std::vector<Worker> wts;  // worker thread handles
+  std::thread dt; 
+  std::vector<Worker> wts; 
   Semaphore dtSem;
   Semaphore wSem;
   std::queue<std::function<void(void)>> thunks;
   mutex thunkLock;
   mutex semLock;
+  bool done = false;
+  int workercount = 0;
   bool kill = false;
-  std::condition_variable_any dtCV;
   std::condition_variable_any wCV;
+  std::condition_variable_any cv;
 
   void dispatcher();
   void work(Worker * worker);

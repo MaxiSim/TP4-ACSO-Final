@@ -87,10 +87,12 @@ void ThreadPool::work(Worker * worker) {
             worker->workLock.unlock();
             return;
         }
+        workercount++;
         worker->workLock.unlock();
         worker->thunk();
         worker->workLock.lock();
         worker->working = false;
+        workercount--;
         worker->workLock.unlock();
         wSem.signal();
     }
@@ -106,31 +108,47 @@ ThreadPool::ThreadPool(size_t numThreads) : wts(numThreads), wSem(numThreads) {
 void ThreadPool::schedule(const function<void(void)>& thunk) {
     lock_guard<mutex> lk(thunkLock);
     thunks.push(thunk);
+    done = false;
+    // cout << "add 1: " << workcount << endl;
     dtSem.signal();
 }
 
+void ThreadPool::wait() {
+    int counter = 0;
+    while(true){
+        if (thunks.size() == 0){
+            for (auto& worker: wts) {
+                worker.workLock.lock();
+                if (worker.working == false){
+                    counter++;
+                }
+                worker.workLock.unlock();
+            }
+            if (counter == wts.size()){
+                break;
+            }
+            counter = 0;
+        }
+    }
+}
+
 // void ThreadPool::wait() {
-//     int counter = 0;
-//     while(true){
-//         if (thunks.size() == 0){
-//             for (auto& worker: wts) {
-//                 worker.workLock.lock();
-//                 if (worker.working == false){
-//                     counter++;
-//                 }
-//                 worker.workLock.unlock();
-//             }
-//             if (counter == wts.size()){
-//                 break;
-//             }
-//             counter = 0;
-//         }
+//     unique_lock<mutex> lk (thunkLock);
+//     if (done){
+//         return;
 //     }
+//     wCV.wait(thunkLock);
+//     done = true;
+//     // cout << "me desperte" << endl;
+//     return;
 // }
 
-void ThreadPool::wait() {
-    thunkLock.lock();
-}
+// void ThreadPool::wait() {
+//     thunkLock.lock();
+//     cv.wait(thunkLock, [this](){return (workercount == 0) && (thunks.empty());});
+//     thunkLock.unlock();
+//     return;
+// }
 
 ThreadPool::~ThreadPool() {
     wait();
